@@ -84,10 +84,8 @@ class Semantics:
         return {'type' : 'program', 'input' : ast[2], 'body' : ast[5], 'return_expr' : ast[8]}
 
 
+def prettier(ast, tab):
 
-
-
-def pretty(ast):
     if ast['type'] == 'constant':
         return str(ast['val'])
 
@@ -95,27 +93,32 @@ def pretty(ast):
         return ast['id']
 
     elif ast['type'] == 'opbin':
-        return pretty(ast['gauche']) + ' ' + ast['op'] + ' ' + pretty(ast['droit'])
+        return prettier(ast['gauche'], 0) + ' ' + ast['op'] + ' ' + prettier(ast['droit'], 0)
 
     elif ast['type'] == 'aff':
-        return pretty(ast['lhs']) + ' = ' + pretty(ast['rhs']) + ';\n'
+        return tab*'\t' + prettier(ast['lhs'], 0) + ' = ' + prettier(ast['rhs'], 0) + ';\n'
 
     elif ast['type'] == 'if':
-        return 'if(' + pretty(ast['expr']) + ') {\n\t' + pretty(ast['body']) + '}\n'
+        return tab*'\t' + 'if(' + prettier(ast['expr'], 0) + ') {\n' + \
+            prettier(ast['body'], tab+1) + \
+            tab*'\t' + '}\n'
 
     elif ast['type'] == 'while':
-        return 'while(' + pretty(ast['expr']) + ') {\n\t' + pretty(ast['body']) + '}\n'
+        return tab*'\t' + 'while(' + prettier(ast['expr'], 0) + ') {\n' + \
+            prettier(ast['body'], tab+1) + \
+            tab*'\t' + '}\n'
 
     elif ast['type'] == 'seq':
-        return pretty(ast['first']) + pretty(ast['second'])
+        return prettier(ast['first'], tab) + prettier(ast['second'], tab)
 
     elif ast['type'] == 'var_list':
-        return ', '.join((pretty(ast_var) for ast_var in ast['list']))
+        return ', '.join((prettier(ast_var, tab) for ast_var in ast['list']))
 
     elif ast['type'] == 'program':
-        return 'main(' + pretty(ast['input']) + ') {\n\t' + \
-                    pretty(ast['body']) + \
-                    'return (' + pretty(ast['return_expr']) + ');\n}'
+        return tab*'\t' + 'main(' + prettier(ast['input'], tab) + ') {\n' + \
+                    prettier(ast['body'], tab+1) + \
+                    (tab+1)*'\t' + 'return (' + prettier(ast['return_expr'], 0) + ');\n' + \
+                    tab*'\t' + '}'
                     
     else:
         print("Uncatch error: " + ast['type'])
@@ -123,16 +126,20 @@ def pretty(ast):
 
 try:
     ast = parse(GRAMMAR, \
-        """main(X, Y, Z) {
+     """main(X, Y, Z) {
             while(X) {
                 X = X - 1;
                 Y = Y + 1;
+            }
+            if(0) {
+                Z = Y;
             }
             return (Y);
         }"""
         , semantics=Semantics())
     print(ast)
-    print(pretty(ast))
+    print("***")
+    print(prettier(ast, 1))
 except Exception as e:
     print(e)
 
