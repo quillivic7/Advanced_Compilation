@@ -63,7 +63,7 @@ class Semantics:
         return {'type' : 'program', 'input' : ast[2],
                 'body' : ast[5], 'return_expr' : ast[8]}
 
-def pprint_expr(expr_ast):
+def pprint_expr(expr_ast, tab = 0):
     if expr_ast['type'] == 'opbin':
         return  "%s %s %s" % (pprint_expr(expr_ast['gauche']), 
         expr_ast['op'], pprint_expr(expr_ast['droit']))
@@ -100,19 +100,19 @@ def compile_expr(expr_ast):
         
     
 
-def pprint_com(com_ast):
+def pprint_com(com_ast, tab = 0):
     if com_ast['type'] == 'aff':
-        return "%s = %s ; " % (com_ast['lhs']['id'], 
+        return "%s%s = %s;" % (tab*'\t', com_ast['lhs']['id'], 
         pprint_expr(com_ast['rhs']))
     elif com_ast['type'] == 'while':
-        return 'while(%s){\n %s\n}' % (pprint_expr(com_ast['expr']), 
-        pprint_com(com_ast['body']))
+        return "%swhile(%s) {\n%s\n%s}" % (tab*'\t', pprint_expr(com_ast['expr']), 
+        pprint_com(com_ast['body'], tab+1), tab*'\t')
     elif com_ast['type'] == 'if':
-        return 'if(%s){\n %s\n}' % (pprint_expr(com_ast['expr']), 
-        pprint_com(com_ast['body']))
+        return "%sif(%s) {\n%s\n%s}" % (tab*'\t', pprint_expr(com_ast['expr']), 
+        pprint_com(com_ast['body'], tab+1), tab*'\t')
     else:
-        return "%s\n%s" % (pprint_com(com_ast['first']), 
-        pprint_com(com_ast['second']))
+        return "%s\n%s" % (pprint_com(com_ast['first'], tab), 
+        pprint_com(com_ast['second'], tab))
     
     
 def var_list_com(com_ast):
@@ -130,7 +130,7 @@ def compile_com(com_ast):
         return """%s
         mov[%s], rax
         """ % (compile_expr(com_ast['rhs']), com_ast['lhs']['id'])
-    elif com_ast['type'] == 'if':
+    if com_ast['type'] == 'if':
         cpt += 1
         return """%s
         cmp rax, 0
@@ -149,13 +149,13 @@ def compile_com(com_ast):
         fin_%s: nop
         """ % (cpt, compile_expr(com_ast['expr']), cpt, compile_com(com_ast['body']), cpt, cpt)
     else:
-        return compile_com(com_ast['first']) + compile_com(['second'])
+        return compile_com(com_ast['first']) + compile_com(com_ast['second'])
         
-def pprint_prg(prg_ast):
+def pprint_prg(prg_ast, tab = 0):
     variables = ", ".join([x['id'] for x in prg_ast['input']['list']])
-    body = pprint_com(prg_ast['body'])
-    ret = pprint_expr(prg_ast['return_expr']) 
-    return ("main (%s) {\n %s\n return (%s);\n}" % (variables, body, ret))
+    body = pprint_com(prg_ast['body'], tab+1)
+    ret = pprint_expr(prg_ast['return_expr'], 0) 
+    return ("%smain(%s) {\n%s\n%sreturn (%s);\n%s}" % (tab*'\t', variables, body, (tab+1)*'\t', ret, tab*'\t'))
    
 def var_list(prg_ast):
     """ return the list of vars with X: dd 0, .... """
@@ -216,6 +216,6 @@ ast = parse(GRAMMAR, """main(X, Y){
     }
     """, semantics=Semantics())
 print(pprint_prg(ast))
-print(compile_prg(ast))
+#print(compile_prg(ast))
 #except Exception as e:
 #    print(e)
