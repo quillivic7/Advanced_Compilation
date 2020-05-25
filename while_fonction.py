@@ -12,21 +12,30 @@ from tatsu.ast import AST
 GRAMMAR = '''
     @@grammar::While
     
-    start = program $
-    ;
+    start = program $ ;
     
-    program = 'main' '(' var_list ')' '{' command 'return' '(' expr ')' ';' '}' ;
+    program = 
+    | function program
+    | var '=' nombre ';' program
+    | 'main' '(' var_list ')' '{' command '}'
+    ;
+
+    function = var '(' var_list ')' '{' command '}' ;
 
     command =  
     | command command
     | 'if' '(' expr ')' '{' command '}'
     | 'while' '(' expr ')' '{' command '}'
-    | var '=' expr ';' ;
+    | var '=' expr ';'
+    | 'return' '(' expr ')' ';'
+    ;
     
     expr =
     | expr op expr
     | var
-    | nombre ;
+    | nombre
+    | var '(' var_list ')'
+    ;
     
     var = /[a-zA-Z][a-zA-Z0-9]*/ ;   
     nombre = /[0-9]+/ ;
@@ -48,21 +57,32 @@ op2asm = {'+' : 'add', '-' : 'sub', '*' : 'imul', '>' : 'test'}
 
 
 class Semantics:
+    """
+    Defines the Semantics for our compiler with the GRAMMAR defined above
+    """
     def nombre(self, ast):
         return {'type' : 'constant', 'val' : int(ast)}
+
     def var(self, ast):
         return {'type' : 'variable', 'id' : ast}
+
     def expr(self, ast) :
         if isinstance(ast, list):
             return {'type' : 'opbin', 'op' : ast[1],
             'gauche' : ast[0], 'droit' : ast[2]}
+        elif ast[1] == '(':
+            return {'type' : 'call_function', 
+            'function' : ast[0], 'input' : ast[2]}
         else:
             return ast
+
     def command(self, ast):
         if ast[0] == 'if':
             return {'type' : 'if', 'expr' : ast[2], 'body' : ast[5]}
         elif ast[0] == 'while':
             return {'type' : 'while', 'expr' : ast[2], 'body' : ast[5]}
+        elif ast[0] == 'return':
+            return {'type' : 'return', 'expr' : ast[2]}
         elif ast[1] == '=':
             return {'type' : 'aff', 'lhs' : ast[0], 'rhs' : ast[2]}
         else:
@@ -77,8 +97,15 @@ class Semantics:
         return {'type' : 'var_list', 'list' : decompose(ast)}
         
     def program(self, ast):
-        return {'type' : 'program', 'input' : ast[2],
-                'body' : ast[5], 'return_expr' : ast[8]}
+        if ast[0] == 'main':
+            return {'type' : 'main', 'input' : ast[2],
+                'body' : ast[5]}
+        elif ast[1] == '(':
+            return {'type' : 'function', 'name' : ast[0],
+                'input' : ast[2],
+                'body' : ast[5]}
+        else:
+            retu
 
 
 
@@ -112,7 +139,7 @@ def pprint_prg(prg_ast, tab = 0):
     variables = ", ".join([x['id'] for x in prg_ast['input']['list']])
     body = pprint_com(prg_ast['body'], tab+1)
     ret = pprint_expr(prg_ast['return_expr'], 0) 
-    return ("%smain(%s) {\n%s\n%sreturn (%s);\n%s}" % (tab*'\t', variables, body, (tab+1)*'\t', ret, tab*'\t'))   
+    return ("%smain(%s) {\n%s\n%sreturn (%s);\n%s}" % (tab*'\t', variables, body, (tab+1)*'\t', ret, tab*'\t'))
 
 
 ### EXPRESSION functions
@@ -148,14 +175,6 @@ def compile_expr(expr_ast):
 ### COMPILE functions
 
 
-def var_list_com(com_ast):
-    if com_ast['type'] == 'aff':
-        return [com_ast['lhs']['id']] + var_list_expr(com_ast['rhs'])
-    elif com_ast['type'] in ['while','if'] :
-        return var_list_expr(com_ast['expr']) + var_list_com(com_ast['body'])
-    else:
-        return var_list_com(com_ast['first']) + var_list_com(com_ast['second'])  
-
 cpt = 0
 def compile_com(com_ast):
     global cpt
@@ -183,7 +202,16 @@ def compile_com(com_ast):
         """ % (cpt, compile_expr(com_ast['expr']), cpt, compile_com(com_ast['body']), cpt, cpt)
     else:
         return compile_com(com_ast['first']) + compile_com(com_ast['second'])
-       
+
+def var_list_com(com_ast):
+    if com_ast['type'] == 'aff':
+        return [com_ast['lhs']['id']] + var_list_expr(com_ast['rhs'])
+    elif com_ast['type'] in ['while','if'] :
+        return var_list_expr(com_ast['expr']) + var_list_com(com_ast['body'])
+    else:
+        return var_list_com(com_ast['first']) + var_list_com(com_ast['second'])
+
+
 def var_list(prg_ast):
     """ return the list of vars with X: dd 0, .... """
     vars = [x['id'] for x in prg_ast['input']['list']]
@@ -206,26 +234,26 @@ def init_var(prg_ast):
     
 def compile_prg(prg_ast):
     code_asm = """extern printf, atoi 
-section .data
-returnExpr: db "%d", 10, 0 ; moule
-argc: dd 0              ; 4 octets
-argv: dq 0  
-VAR_LIST
-global main           ; moule
-section .text   
-main: 
-    push rbp
-    ; LE CODE DU COMPILO
-    mov [argc], rdi
-    mov [argv], rsi
-    INIT_VAR
-    BODY 
-    EVAL_RETURN
-    mov rdi, returnExpr
-    mov rsi, rax
-    call printf
-    pop rbp
-    ret"""
+    section .data
+    returnExpr: db "%d", 10, 0 ; moule
+    argc: dd 0              ; 4 octets
+    argv: dq 0  
+    VAR_LIST
+    global main           ; moule
+    section .text   
+    main: 
+        push rbp
+        ; LE CODE DU COMPILO
+        mov [argc], rdi
+        mov [argv], rsi
+        INIT_VAR
+        BODY 
+        EVAL_RETURN
+        mov rdi, returnExpr
+        mov rsi, rax
+        call printf
+        pop rbp
+        ret"""
     code_asm = code_asm.replace("VAR_LIST", var_list(prg_ast))
     code_asm = code_asm.replace("INIT_VAR", init_var(prg_ast))
     code_asm = code_asm.replace("EVAL_RETURN", compile_expr(prg_ast['return_expr']))
@@ -233,20 +261,61 @@ main:
     return code_asm
 
  
-try:
-    ast = parse(GRAMMAR, """main(X, Y){
-        while(X){
-        X = X - 1;
-        Y = Y + 1;
-        }
-        return (Y) ; 
-        }
-        """, semantics=Semantics())
-    print(ast)
-    print(pprint_prg(ast))
-    print(compile_prg(ast))
-    myfile = open("code.asm", 'w')
-    myfile.write(compile_prg(ast))
-    myfile.close()
-except Exception as e:
-    print(e)
+#try:
+ast = parse(GRAMMAR, """main(X, Y){
+    while(X){
+    X = X - 1;
+    Y = Y + 1;
+    }
+    return (Y) ; 
+    }
+    """, semantics=Semantics())
+print(ast)
+print(pprint_prg(ast))
+#print(compile_prg(ast))
+#myfile = open("code.asm", 'w')
+#myfile.write(compile_prg(ast))
+#myfile.close()
+#except Exception as e:
+#    print(e)
+
+"""
+add(x, y) {
+    return (x+y);
+}
+
+main(x, y) {
+    z = add(x, y);
+    return (z);
+}
+"""
+
+"""
+add(x, y) {
+    return (x+y);
+}
+
+triple_add(x, y, z) {
+    a = add(x, y);
+    b = add(a, z);
+    return (b); 
+}
+
+main(x, y, z) {
+    z = add(x, y, z);
+    printf(z);
+    return (z);
+}
+"""
+
+"""
+main(x) {
+    add_1(x) {
+        return (x+1);
+    }
+    z = add_1(x);
+    printf(z);
+    return (z);
+}
+"""
+
