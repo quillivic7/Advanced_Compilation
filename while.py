@@ -219,7 +219,7 @@ main:
     mov [argc], rdi
     mov [argv], rsi
     INIT_VAR
-    BODY 
+    BODY
     EVAL_RETURN
     mov rdi, returnExpr
     mov rsi, rax
@@ -233,20 +233,20 @@ main:
     return code_asm
 
  
-try:
-    ast = parse(GRAMMAR, """main(X, Y){
-        while(X){
-        X = X - 1;
-        Y = Y + 1;
-        }
-        return (Y) ; 
-        }
-        """, semantics=Semantics())
-    print(ast)
-    print(pprint_prg(ast))
-    print(compile_prg(ast))
-    myfile = open("code.asm", 'w')
-    myfile.write(compile_prg(ast))
-    myfile.close()
-except Exception as e:
-    print(e)
+#try:
+ast = parse(GRAMMAR, """main(X, Y){
+    while(X){
+    X = X - 1;
+    Y = Y + 1;
+    }
+    return (Y) ; 
+    }
+    """, semantics=Semantics())
+print(ast)
+#print(pprint_prg(ast))
+print(compile_prg(ast))
+#myfile = open("code.asm", 'w')
+#myfile.write(compile_prg(ast))
+#myfile.close()
+#except Exception as e:
+#    print(e)

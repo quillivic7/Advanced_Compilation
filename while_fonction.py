@@ -24,17 +24,18 @@ GRAMMAR = '''
 
     command =  
     | command command
+    | var '=' expr ';'
     | 'if' '(' expr ')' '{' command '}'
     | 'while' '(' expr ')' '{' command '}'
-    | var '=' expr ';'
+    | function
     | 'return' '(' expr ')' ';'
     ;
     
     expr =
     | expr op expr
+    | var '(' var_list ')'
     | var
     | nombre
-    | var '(' var_list ')'
     ;
     
     var = /[a-zA-Z][a-zA-Z0-9]*/ ;   
@@ -60,21 +61,16 @@ class Semantics:
     """
     Defines the Semantics for our compiler with the GRAMMAR defined above
     """
-    def nombre(self, ast):
-        return {'type' : 'constant', 'val' : int(ast)}
-
-    def var(self, ast):
-        return {'type' : 'variable', 'id' : ast}
-
-    def expr(self, ast) :
-        if isinstance(ast, list):
-            return {'type' : 'opbin', 'op' : ast[1],
-            'gauche' : ast[0], 'droit' : ast[2]}
-        elif ast[1] == '(':
-            return {'type' : 'call_function', 
-            'function' : ast[0], 'input' : ast[2]}
+    def program(self, ast):
+        if ast[0] == 'main':
+            return {'type' : 'main_function', 'input' : ast[2], 'body' : ast[5]}
+        elif ast[1] == '=':
+            return {'type' : 'global_var', 'name' : ast[0], 'value' : ast[2], 'program' : ast[4]}
         else:
-            return ast
+            return {'type' : 'function', 'function' : ast[0], 'program' : ast[1]}
+
+    def function(self, ast):
+        return {'type' : 'function', 'name' : ast[0], 'input' : ast[2], 'body' : ast[5]}
 
     def command(self, ast):
         if ast[0] == 'if':
@@ -84,10 +80,27 @@ class Semantics:
         elif ast[0] == 'return':
             return {'type' : 'return', 'expr' : ast[2]}
         elif ast[1] == '=':
-            return {'type' : 'aff', 'lhs' : ast[0], 'rhs' : ast[2]}
+            return {'type' : 'affect', 'lhs' : ast[0], 'rhs' : ast[2]}                
+        elif len(ast) > 6 and ast[1] == '(' and ast[3] == ')' and ast[4] == '{' and ast[6] == '}':
+            return{'type' : 'local_function', 'function' : ast}
         else:
             return {'type' : 'seq', 'first' : ast[0], 'second' : ast[1]}
-        
+
+    def expr(self, ast) :
+        if isinstance(ast, list):
+            if ast[1] in op2asm:
+                return {'type' : 'opbin', 'op' : ast[1], 'gauche' : ast[0], 'droit' : ast[2]}
+            elif ast[1] == '(':
+                return {'type' : 'call_function', 'function' : ast[0], 'input' : ast[2]}
+        else: 
+            return ast
+
+    def var(self, ast):
+        return {'type' : 'variable', 'id' : ast}
+
+    def nombre(self, ast):
+        return {'type' : 'constant', 'val' : int(ast)}
+ 
     def var_list(self, ast):
         def decompose(ast):
             if isinstance(ast, tuple):
@@ -95,17 +108,8 @@ class Semantics:
             else:
                 return [ast]
         return {'type' : 'var_list', 'list' : decompose(ast)}
-        
-    def program(self, ast):
-        if ast[0] == 'main':
-            return {'type' : 'main', 'input' : ast[2],
-                'body' : ast[5]}
-        elif ast[1] == '(':
-            return {'type' : 'function', 'name' : ast[0],
-                'input' : ast[2],
-                'body' : ast[5]}
-        else:
-            retu
+
+
 
 
 
@@ -122,7 +126,7 @@ def pprint_expr(expr_ast, tab = 0):
         return expr_ast['id']
 
 def pprint_com(com_ast, tab = 0):
-    if com_ast['type'] == 'aff':
+    if com_ast['type'] == 'affect':
         return "%s%s = %s;" % (tab*'\t', com_ast['lhs']['id'], 
         pprint_expr(com_ast['rhs']))
     elif com_ast['type'] == 'while':
@@ -142,180 +146,304 @@ def pprint_prg(prg_ast, tab = 0):
     return ("%smain(%s) {\n%s\n%sreturn (%s);\n%s}" % (tab*'\t', variables, body, (tab+1)*'\t', ret, tab*'\t'))
 
 
-### EXPRESSION functions
 
+### COMPILE functions
+
+##### VAR_LIST functions
+
+def var_list(prg_ast):
+    vars_set = var_list_prg(prg_ast)
+    res = ""
+    for v in vars_set:
+        if v == "returnExpr":
+            res += "%s: db \"%%d\", 10, 0\n" % v
+        elif v == "argc":
+            res += "%s: dd 0\n" % v
+        elif v == "argv":
+            res += "%s: dq 0\n" % v
+        else:
+            res += "%s: dq 0\n" % v
+    return res
+
+def var_list_prg(prg_ast):
+    if prg_ast['type'] == 'global_var':
+        return var_list_expr(prg_ast['global_var']) | var_list_prg(prg_ast['program'])
+    elif prg_ast['type'] == 'function':
+        return var_list_fun(prg_ast['function']) | var_list_prg(prg_ast['program'])
+    else:
+        return {"returnExpr", "argc", "argv"} | var_list_fun(prg_ast)
+
+def var_list_fun(fun_ast):
+    #""" return the list of vars with X: dq 0, .... """
+    vars = [x['id'] for x in fun_ast['input']['list']]
+    vars += var_list_com(fun_ast['body'])
+    #vars += var_list_expr(prg_ast['return_expr'])
+    vars_set = set(vars)
+    #
+    return vars_set
+
+def var_list_com(com_ast):
+    if com_ast['type'] == 'affect':
+        return [com_ast['lhs']['id']] + var_list_expr(com_ast['rhs'])
+    elif com_ast['type'] in ['while','if'] :
+        return var_list_expr(com_ast['expr']) + var_list_com(com_ast['body'])
+    elif com_ast['type'] =='return':
+        return var_list_expr(com_ast['expr'])
+    elif com_ast['type'] == 'local_function':
+        return var_list_fun(com_ast)
+    else:
+        return var_list_com(com_ast['first']) + var_list_com(com_ast['second'])
 
 def var_list_expr(expr_ast):
     if expr_ast['type'] == 'opbin':
         return var_list_expr(expr_ast['gauche']) + var_list_expr(expr_ast['droit']) 
     elif expr_ast['type'] == 'constant':
         return []
+    elif expr_ast['type'] == 'call_function':
+        return []
     else:
         return [expr_ast['id']]
 
+##### FUNCTIONS functions
+
+def functions(prg_ast):
+    funcs_set = functions_prg(prg_ast)
+    return "\n".join(["global %s" % f for f in funcs_set]) + "\n"
+
+def functions_prg(prg_ast):
+    if prg_ast['type'] == 'global_var':
+        return functions_prg(prg_ast['program'])
+    elif prg_ast['type'] == 'function':
+        return {prg_ast['function']['name']['id']} | functions_prg(prg_ast['program'])
+    else:
+        return {"main"}
+
+##### PROGRAM functions 
+
+def init_var(prg_ast):
+    def decompose(prg_ast):
+        if prg_ast['type'] == 'function':
+            return [x['id'] for x in prg_ast['function']['input']['list']] + decompose(prg_ast['programme'])
+        elif prg_ast['type'] == 'global_var':
+            return prg_ast['name']['id'] + decompose(prg_ast['program'])
+        else:
+            return [x['id'] for x in prg_ast['input']['list']]
+    vars = decompose(prg_ast)
+    ivar = ""
+    for i in range(len(vars)):
+        ivar += """
+mov rax, [argv]
+mov rdi, [rax+%s]
+call atoi
+mov [%s], rax
+""" % (8*(i+1), vars[i])
+    return ivar 
+
+def init_var_fun(fun_ast):
+    vars = [x['id'] for x in fun_ast['input']['list']]
+    ivar = ""
+    for i in range(len(vars)):
+        ivar += """; initialisation variables fonction
+mov rax, [argv]
+mov rdi, [rax+%s] 
+call atoi
+mov [%s], rax
+""" % (8*(i+1), vars[i])
+    return ivar  
+
+
 def compile_expr(expr_ast):
     if expr_ast['type'] == 'constant':
-        return """mov rax, %s
-        """ % expr_ast['val']
+        return """; constante
+mov rax, %s
+""" % expr_ast['val']
     elif expr_ast['type'] == 'variable':
-        return """mov rax, [%s]
-        """ % expr_ast['id']
+        return """; variable
+mov rax, [%s]
+""" % expr_ast['id']
+    elif expr_ast['type'] == 'call_function':
+        return """; appel de fonction
+call %s
+""" % expr_ast['function']['id']
     else:
         e1 = compile_expr(expr_ast['gauche'])
         e2 = compile_expr(expr_ast['droit'])
-        return """%s
-        push rax
-        %s
-        pop rbx
-        %s rax, rbx
-        """ % (e2, e1, op2asm[expr_ast['op']])
-
-
-
-### COMPILE functions
-
+        return """; operation binaire
+%s
+push rax
+%s
+pop rbx
+%s rax, rbx
+""" % (e2, e1, op2asm[expr_ast['op']])
 
 cpt = 0
 def compile_com(com_ast):
     global cpt
-    if com_ast['type'] == 'aff':
-        return """%s
-        mov [%s], rax
-        """ % (compile_expr(com_ast['rhs']), com_ast['lhs']['id'])
+    if com_ast['type'] == 'affect':
+        return """; affectation
+%s
+mov [%s], rax
+""" % (compile_expr(com_ast['rhs']), com_ast['lhs']['id'])
     if com_ast['type'] == 'if':
         cpt += 1
-        return """%s
-        cmp rax, 0
-        jz fin_%s
-        %s
-        fin_%s: nop
-        """ % (compile_expr(com_ast['expr']), cpt, compile_com(com_ast['body']), cpt)
+        return """; if
+%s
+cmp rax, 0
+jz fin_%s
+%s
+fin_%s: nop
+""" % (compile_expr(com_ast['expr']), cpt, compile_com(com_ast['body']), cpt)
     elif com_ast['type'] == 'while':
         cpt += 1
-        return """debut_%s:
-        %s
-        cmp rax, 0
-        jz fin_%s
-        %s
-        jmp debut_%s
-        fin_%s: nop
-        """ % (cpt, compile_expr(com_ast['expr']), cpt, compile_com(com_ast['body']), cpt, cpt)
+        return """; while
+debut_%s:
+%s
+cmp rax, 0
+jz fin_%s
+%s
+jmp debut_%s
+fin_%s: nop
+""" % (cpt, compile_expr(com_ast['expr']), cpt, compile_com(com_ast['body']), cpt, cpt)
+    elif com_ast['type'] == 'return':
+        return """; return
+%s
+mov rdi, returnExpr
+mov rsi, rax
+call printf
+pop rbp
+ret
+""" % (compile_expr(com_ast['expr']))
+    elif com_ast['type'] == 'local_function':
+        return None #TODO
     else:
         return compile_com(com_ast['first']) + compile_com(com_ast['second'])
 
-def var_list_com(com_ast):
-    if com_ast['type'] == 'aff':
-        return [com_ast['lhs']['id']] + var_list_expr(com_ast['rhs'])
-    elif com_ast['type'] in ['while','if'] :
-        return var_list_expr(com_ast['expr']) + var_list_com(com_ast['body'])
-    else:
-        return var_list_com(com_ast['first']) + var_list_com(com_ast['second'])
-
-
-def var_list(prg_ast):
-    """ return the list of vars with X: dd 0, .... """
-    vars = [x['id'] for x in prg_ast['input']['list']]
-    vars += var_list_com(prg_ast['body'])
-    vars += var_list_expr(prg_ast['return_expr'])
-    vars_set = set(vars)
-    return "\n".join(["%s: dq 0" % v for v in vars_set]) 
-
-def init_var(prg_ast):
-    vars = [x['id'] for x in prg_ast['input']['list']]
-    ivar = ""
-    for i in range(len(vars)):
-        ivar += """
-        mov rax, [argv]
-        mov rdi, [rax+%s] 
-        call atoi ; le resultat est un entier, il est stocké dans rax
-        mov [%s], rax
-        """ % (8*(i+1), vars[i])
-    return ivar    
+def compile_fun(fun_ast):
+    return """; fonction
+%s:
+push rbp
+mov rbp, rsp
+%s
+%s
+""" % (fun_ast['name']['id'], init_var_fun(fun_ast), compile_com(fun_ast['body']))
+  
     
 def compile_prg(prg_ast):
-    code_asm = """extern printf, atoi 
-    section .data
-    returnExpr: db "%d", 10, 0 ; moule
-    argc: dd 0              ; 4 octets
-    argv: dq 0  
-    VAR_LIST
-    global main           ; moule
-    section .text   
-    main: 
-        push rbp
-        ; LE CODE DU COMPILO
-        mov [argc], rdi
-        mov [argv], rsi
-        INIT_VAR
-        BODY 
-        EVAL_RETURN
-        mov rdi, returnExpr
-        mov rsi, rax
-        call printf
-        pop rbp
-        ret"""
-    code_asm = code_asm.replace("VAR_LIST", var_list(prg_ast))
-    code_asm = code_asm.replace("INIT_VAR", init_var(prg_ast))
-    code_asm = code_asm.replace("EVAL_RETURN", compile_expr(prg_ast['return_expr']))
-    code_asm = code_asm.replace("BODY", compile_com(prg_ast['body']))
+    if prg_ast['type'] == 'function':
+        return compile_fun(prg_ast['function']) + compile_prg(prg_ast['program'])
+    elif prg_ast['type'] == 'global_var':
+        return compile_expr(prg_ast) + compile_prg(prg_ast['program'])
+    else:
+        code_main = """; fonction main
+main:
+push rbp
+mov [argc], rdi
+mov [argv], rsi
+INIT_VAR
+BODY
+"""
+        code_main = code_main.replace("INIT_VAR", init_var(prg_ast))
+        code_main = code_main.replace("BODY", compile_com(prg_ast['body']))
+        #code_main = code_main.replace("EVAL_RETURN", compile_expr(ast['return_expr']))
+        return code_main
+        
+
+    
+
+def compile(ast):
+    code_asm =  """; programme
+extern printf, atoi
+section .data
+VAR_LIST
+FUNCTIONS
+section .text
+PROGRAM
+"""
+    code_asm = code_asm.replace("VAR_LIST", var_list(ast))
+    code_asm = code_asm.replace("FUNCTIONS", functions(ast))
+    code_asm = code_asm.replace("PROGRAM", compile_prg(ast))
     return code_asm
 
- 
-#try:
-ast = parse(GRAMMAR, """main(X, Y){
-    while(X){
-    X = X - 1;
-    Y = Y + 1;
-    }
-    return (Y) ; 
-    }
-    """, semantics=Semantics())
-print(ast)
-print(pprint_prg(ast))
-#print(compile_prg(ast))
-#myfile = open("code.asm", 'w')
-#myfile.write(compile_prg(ast))
-#myfile.close()
-#except Exception as e:
-#    print(e)
 
+example0 = """
+main(X, Y) {
+    while(X) {
+        X = X - 1;
+        Y = Y + 1;
+        Z = 1;
+    }
+    return(Y); 
+}
 """
-add(x, y) {
-    return (x+y);
+
+example0bis = """
+main(x) {
+    i = 10;
+    while(i) {
+        x = x+1;
+        i = i-1;
+    }
+    return(x);
+}
+"""
+
+example1 = """
+main(x) {
+    return(x);
+}
+"""
+
+example2 = """
+add (x, y) {
+    a = x + y;
+    return(a);
 }
 
-main(x, y) {
+main (x, y) {
     z = add(x, y);
-    return (z);
+    return(z);
 }
 """
 
-"""
+example3 = """
 add(x, y) {
-    return (x+y);
+    return(x+y);
 }
 
-triple_add(x, y, z) {
+tripleadd(x, y, z) {
     a = add(x, y);
     b = add(a, z);
-    return (b); 
+    return(b); 
 }
 
 main(x, y, z) {
-    z = add(x, y, z);
-    printf(z);
-    return (z);
+    z = tripleadd(x, y, z);
+    return(z);
 }
 """
 
-"""
+example4 = """
 main(x) {
-    add_1(x) {
-        return (x+1);
+    add1(x) {
+        return(x+1);
     }
-    z = add_1(x);
-    printf(z);
-    return (z);
+    z = add1(x);
+    return(z);
 }
 """
+
+ 
+#try:
+example = example0
+ast = parse(GRAMMAR, example, semantics=Semantics())
+print("example = " + example)
+print("ast = " + str(ast))
+print()
+#print(pprint_prg(ast))
+print(compile(ast))
+myfile = open("code.asm", 'w')
+myfile.write(compile(ast))
+#except Exception as e:
+#    print(e)
+
 
