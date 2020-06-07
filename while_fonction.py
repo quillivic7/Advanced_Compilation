@@ -434,7 +434,7 @@ main(x) {
 
  
 #try:
-example = example0
+example = example3
 ast = parse(GRAMMAR, example, semantics=Semantics())
 print("example = " + example)
 print("ast = " + str(ast))
