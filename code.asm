@@ -3,12 +3,12 @@ extern printf, atoi
 section .data
 argv: dq 0
 x: dq 0
+b: dq 0
+z: dq 0
+y: dq 0
 argc: dd 0
 a: dq 0
-y: dq 0
 returnExpr: db "%d", 10, 0
-z: dq 0
-b: dq 0
 
 global main
 global add
