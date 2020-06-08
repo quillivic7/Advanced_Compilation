@@ -515,7 +515,7 @@ main(x) {
 }
 """
 
-example = example3
+example = example2
 #try:
 ast = parse(GRAMMAR, example, semantics=Semantics())
 print("example = " + example)
