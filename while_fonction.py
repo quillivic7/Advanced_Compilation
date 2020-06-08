@@ -59,7 +59,8 @@ op2asm = {'+' : 'add', '-' : 'sub', '*' : 'imul', '>' : 'test'}
 
 class Semantics:
     """
-    Defines the Semantics for our compiler with the GRAMMAR defined above
+    Définit la Semantics pour le compilateur
+    avec la GRAMMAR définie ci-dessus
     """
     def program(self, ast):
         if ast[0] == 'main':
@@ -152,6 +153,16 @@ def pprint_prg(prg_ast, tab = 0):
 ##### VAR_LIST functions
 
 def var_list(prg_ast):
+    """
+    Enumère les variables
+    définies dans le code assembleur 
+    dans la section .data
+    ex: 
+        x: dq 0
+        y: dq 0
+        argv: dq 0
+        argc: dd 0
+    """
     vars_set = var_list_prg(prg_ast)
     res = ""
     for v in vars_set:
@@ -166,6 +177,11 @@ def var_list(prg_ast):
     return res
 
 def var_list_prg(prg_ast):
+    """
+    Récupère le nom des différentes 
+    variables du programme
+    en les stockant dans un ensemble
+    """
     if prg_ast['type'] == 'global_var':
         return var_list_expr(prg_ast['global_var']) | var_list_prg(prg_ast['program'])
     elif prg_ast['type'] == 'function':
@@ -174,15 +190,21 @@ def var_list_prg(prg_ast):
         return {"returnExpr", "argc", "argv"} | var_list_fun(prg_ast)
 
 def var_list_fun(fun_ast):
-    #""" return the list of vars with X: dq 0, .... """
+    """ 
+    Traite les variables
+    au sein des fonctions
+    """
     vars = [x['id'] for x in fun_ast['input']['list']]
     vars += var_list_com(fun_ast['body'])
     #vars += var_list_expr(prg_ast['return_expr'])
     vars_set = set(vars)
-    #
     return vars_set
 
 def var_list_com(com_ast):
+    """ 
+    Traite les variables
+    au sein des commandes
+    """
     if com_ast['type'] == 'affect':
         return [com_ast['lhs']['id']] + var_list_expr(com_ast['rhs'])
     elif com_ast['type'] in ['while','if'] :
@@ -195,6 +217,10 @@ def var_list_com(com_ast):
         return var_list_com(com_ast['first']) + var_list_com(com_ast['second'])
 
 def var_list_expr(expr_ast):
+    """ 
+    Traite les variables
+    au sein des expressions
+    """
     if expr_ast['type'] == 'opbin':
         return var_list_expr(expr_ast['gauche']) + var_list_expr(expr_ast['droit']) 
     elif expr_ast['type'] == 'constant':
@@ -207,10 +233,22 @@ def var_list_expr(expr_ast):
 ##### FUNCTIONS functions
 
 def functions(prg_ast):
+    """
+    Enumère les fonctions
+    définies dans le code assembleur 
+    dans la section .data
+    ex: 
+        global main
+    """
     funcs_set = functions_prg(prg_ast)
     return "\n".join(["global %s" % f for f in funcs_set]) + "\n"
 
 def functions_prg(prg_ast):
+    """
+    Récupère le nom des différentes
+    fonctions du programme
+    en les stockant dans un ensemble
+    """
     if prg_ast['type'] == 'global_var':
         return functions_prg(prg_ast['program'])
     elif prg_ast['type'] == 'function':
@@ -221,7 +259,16 @@ def functions_prg(prg_ast):
 ##### PROGRAM functions 
 
 def init_var(prg_ast):
+    """
+    Initialise les variables
+    concernées dans ce programme
+    et les stocke dans la mémoire
+    """
     def decompose(prg_ast):
+        """
+        Récupère les variables
+        concernées dans ce programme
+        """
         if prg_ast['type'] == 'function':
             return [x['id'] for x in prg_ast['function']['input']['list']] + decompose(prg_ast['programme'])
         elif prg_ast['type'] == 'global_var':
@@ -231,7 +278,7 @@ def init_var(prg_ast):
     vars = decompose(prg_ast)
     ivar = ""
     for i in range(len(vars)):
-        ivar += """
+        ivar += """; main variables init
 mov rax, [argv]
 mov rdi, [rax+%s]
 call atoi
@@ -240,21 +287,30 @@ mov [%s], rax
     return ivar 
 
 def init_var_fun(fun_ast):
+    """
+    Initialise les variables
+    concernées dans cette fonction
+    et les stocke dans la mémoire
+    """
     vars = [x['id'] for x in fun_ast['input']['list']]
     ivar = ""
     for i in range(len(vars)):
         ivar += """; initialisation variables fonction
 mov rax, [argv]
-mov rdi, [rax+%s] 
+mov rdi, [rax+%s]
 call atoi
 mov [%s], rax
-""" % (8*(i+1), vars[i])
+""" % (8*(i+1), vars[i]) #TODO
     return ivar  
 
 
 def compile_expr(expr_ast):
+    """
+    Génère le code assembleur
+    correspondant à l'expression
+    """
     if expr_ast['type'] == 'constant':
-        return """; constante
+        return """; constant
 mov rax, %s
 """ % expr_ast['val']
     elif expr_ast['type'] == 'variable':
@@ -262,13 +318,15 @@ mov rax, %s
 mov rax, [%s]
 """ % expr_ast['id']
     elif expr_ast['type'] == 'call_function':
-        return """; appel de fonction
+        nb_params = len(expr_ast['input']['list'])
+        params = "push " + "\npush ".join([x['id'] for x in expr_ast['input']['list']])
+        return """; function call 
 call %s
-""" % expr_ast['function']['id']
+""" % (expr_ast['function']['id']) #TODO
     else:
         e1 = compile_expr(expr_ast['gauche'])
         e2 = compile_expr(expr_ast['droit'])
-        return """; operation binaire
+        return """; binary opcode
 %s
 push rax
 %s
@@ -278,9 +336,13 @@ pop rbx
 
 cpt = 0
 def compile_com(com_ast):
+    """
+    Génère le code assembleur
+    correspondant à la commande
+    """
     global cpt
     if com_ast['type'] == 'affect':
-        return """; affectation
+        return """; affect
 %s
 mov [%s], rax
 """ % (compile_expr(com_ast['rhs']), com_ast['lhs']['id'])
@@ -307,61 +369,80 @@ fin_%s: nop
     elif com_ast['type'] == 'return':
         return """; return
 %s
-mov rdi, returnExpr
-mov rsi, rax
-call printf
-pop rbp
-ret
-""" % (compile_expr(com_ast['expr']))
+mov eax, [%s]
+""" % (compile_expr(com_ast['expr']), com_ast['expr']['id'])
     elif com_ast['type'] == 'local_function':
         return None #TODO
     else:
         return compile_com(com_ast['first']) + compile_com(com_ast['second'])
 
 def compile_fun(fun_ast):
-    return """; fonction
+    """
+    Génère le code assembleur
+    correspondant à la fonction
+    """
+    return """; function
 %s:
 push rbp
 mov rbp, rsp
 %s
 %s
-""" % (fun_ast['name']['id'], init_var_fun(fun_ast), compile_com(fun_ast['body']))
+;nop
+pop rbp
+ret
+""" % (fun_ast['name']['id'], init_var_fun(fun_ast), compile_com(fun_ast['body'])) #TODO
   
     
 def compile_prg(prg_ast):
+    """
+    Génère le code assembleur
+    correspondant au programme
+    """
     if prg_ast['type'] == 'function':
         return compile_fun(prg_ast['function']) + compile_prg(prg_ast['program'])
     elif prg_ast['type'] == 'global_var':
         return compile_expr(prg_ast) + compile_prg(prg_ast['program'])
     else:
-        code_main = """; fonction main
+        code_main = """; main function
 main:
 push rbp
-mov [argc], rdi
+mov rbp, rsp
+mov [argc], edi
 mov [argv], rsi
-INIT_VAR
-BODY
+_INIT_VAR
+_BODY
+mov rdi, returnExpr
+mov rsi, rax
+call printf
+pop rbp
+ret
 """
-        code_main = code_main.replace("INIT_VAR", init_var(prg_ast))
-        code_main = code_main.replace("BODY", compile_com(prg_ast['body']))
-        #code_main = code_main.replace("EVAL_RETURN", compile_expr(ast['return_expr']))
-        return code_main
+        code_main = code_main.replace("_INIT_VAR", init_var(prg_ast))
+        code_main = code_main.replace("_BODY", compile_com(prg_ast['body']))
+        return code_main #TODO
         
 
     
 
 def compile(ast):
-    code_asm =  """; programme
+    """
+    Génère le code assembleur général
+    """
+    code_asm =  """; PROGRAM
 extern printf, atoi
+
 section .data
-VAR_LIST
-FUNCTIONS
+; VAR_LIST
+_VAR_LIST
+; FUNCTIONS
+_FUNCTIONS
 section .text
-PROGRAM
+; PROGRAM BODY
+_PROGRAM
 """
-    code_asm = code_asm.replace("VAR_LIST", var_list(ast))
-    code_asm = code_asm.replace("FUNCTIONS", functions(ast))
-    code_asm = code_asm.replace("PROGRAM", compile_prg(ast))
+    code_asm = code_asm.replace("_VAR_LIST", var_list(ast))
+    code_asm = code_asm.replace("_FUNCTIONS", functions(ast))
+    code_asm = code_asm.replace("_PROGRAM", compile_prg(ast))
     return code_asm
 
 
@@ -407,7 +488,8 @@ main (x, y) {
 
 example3 = """
 add(x, y) {
-    return(x+y);
+    a = x+y;
+    return(a);
 }
 
 tripleadd(x, y, z) {
@@ -425,24 +507,25 @@ main(x, y, z) {
 example4 = """
 main(x) {
     add1(x) {
-        return(x+1);
+        x = x+1;
+        return(x);
     }
     z = add1(x);
     return(z);
 }
 """
 
- 
+example = example2
 #try:
-example = example3
 ast = parse(GRAMMAR, example, semantics=Semantics())
 print("example = " + example)
 print("ast = " + str(ast))
 print()
 #print(pprint_prg(ast))
-print(compile(ast))
+code_asm = compile(ast)
+print(code_asm)
 myfile = open("code.asm", 'w')
-myfile.write(compile(ast))
+myfile.write(code_asm)
 #except Exception as e:
 #    print(e)
 
